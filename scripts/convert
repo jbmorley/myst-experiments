@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+
+import argparse
+import contextlib
+import os
+import shutil
+import subprocess
+import tempfile
+
+
+def basename(path):
+    basename, _ = os.path.splitext(os.path.basename(path))
+    return basename
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("path")
+    parser.add_argument("algorithm", choices=["atkinson", "floydsteinberg"])
+    options = parser.parse_args()
+
+    path = os.path.abspath(options.path)
+    output_path = os.path.join(os.path.dirname(path), f"{basename(path)}-{options.algorithm}.gif")
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+
+        # Create the working directories.
+        source_directory = os.path.join(temporary_directory, "source")
+        dithered_directory = os.path.join(temporary_directory, "dithered")
+        os.makedirs(source_directory)
+        os.makedirs(dithered_directory)
+
+        # Extract the frames.
+        with contextlib.chdir(source_directory):
+            subprocess.run([
+                "ffmpeg",
+                "-i", path,
+                "frame-%09d.png",
+            ])
+        frames = [os.path.join(source_directory, f) for f in sorted(os.listdir(source_directory))]
+
+        # Dither the frames.
+        dither_params = []
+        if options.algorithm == "atkinson":
+            dither_params = ["edm", "atkinson"]
+        elif options.algorithm == "floydsteinberg":
+            dither_params = ["edm", "--serpentine", "FloydSteinberg"]
+        else:
+            exit("Unknown dither algorithm '{options.algorithm}'")
+
+        converted = []
+        for frame in frames:
+            dithered_path = os.path.join(dithered_directory, f"{basename(frame)}.gif")
+            subprocess.run([
+                "didder",
+                "-palette", "black white",
+                "-i", frame,
+                "-o", dithered_path,
+            ] + dither_params)
+            converted.append(dithered_path)
+
+        # Create an animated gif.
+        subprocess.run(["convert"] + converted + [output_path])
+
+
+if __name__ == "__main__":
+    main()
