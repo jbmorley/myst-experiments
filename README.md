@@ -8,36 +8,37 @@ It's not yet clear which dithering algorithm would work best–Atkinson looks gr
 
 ### Movies
 
-Atkinson:
-
-![INTRO.MOV (Atkinson dithering)](examples/movies/INTRO-atkinson.gif)
-
-Floyd-Steinberg:
-
-![INTRO.MOV (Floyd-Steinberg dithering)](examples/movies/INTRO-floydsteinberg.gif)
-
 <table>
+  <tr>
+    <th>Atkinson</th>
+		<th>Floyd-Steinberg</th>
+  </tr>
+  <tr>
+    <td>
+      <img src="examples/movies/INTRO-atkinson.gif">
+    </td>
+    <td>
+      <img src="examples/movies/INTRO-floydsteinberg.gif">
+    </td>
+  </tr>
   <tr>
     <td>
       <img src="examples/movies/INTRO2-atkinson.gif">
-      Atkinson
     </td>
     <td>
       <img src="examples/movies/INTRO2-floydsteinberg.gif">
-      Floyd-Steinberg
     </td>
   </tr>
   <tr>
     <td>
       <img src="examples/movies/GEARS-atkinson.gif">
-      Atkinson
     </td>
     <td>
       <img src="examples/movies/GEARS-floydsteinberg.gif">
-      Floyd-Steinberg
     </td>
   </tr>
 </table>
+
 
 ### Frames
 
