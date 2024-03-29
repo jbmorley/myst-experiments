@@ -52,8 +52,6 @@ class Stream:
         while True:
             char = self.read(1).decode("ascii")
             if char == '\x00':
-                print("END")
-                print(result)
                 return result
             result += char
 
@@ -133,7 +131,7 @@ def main():
         for type_index in range(type_count):
             print(f"Type {type_index}...")
 
-            tag = stream.read_uint32()
+            tag = stream.read_ascii(4)
             resource_table_offset = stream.read_uint16()
             name_table_offset = stream.read_uint16()
             print(tag, resource_table_offset, name_table_offset)
@@ -146,7 +144,6 @@ def main():
             print(f"Names = {name_table_size}")
 
             for i in range(name_table_size):
-                print(f"Loading name {i}...")
                 name_table.append(NameTableEntry(
                     offset=stream.read_uint16(),
                     index=stream.read_uint16(),
@@ -154,7 +151,6 @@ def main():
                 ))
 
             for name_table_entry in name_table:
-                print(f"Reading name for {name_table_entry.index}...")
                 stream.seek(abs_offset + string_table_offset + name_table_entry.offset)
                 name_table_entry.name = stream.read_string()
 
