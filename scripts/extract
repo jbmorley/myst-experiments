@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+
+import argparse
+import collections
+import io
+import mmap
+import os
+import struct
+
+
+class Stream:
+
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        self.file = open(self.path, "rb")
+        self.file_descriptor = self.file.fileno()
+        self.file_size = os.path.getsize(self.path)
+        self.mmap = mmap.mmap(self.file_descriptor, self.file_size, access=mmap.ACCESS_READ)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.mmap.close()
+        self.file.close()
+
+    def seek(self, whence=os.SEEK_SET):
+        self.mmap.seek(whence)
+
+    def read(self, size):
+        return self.mmap.read(size)
+
+    def read_ascii(self, size):
+        return self.read(size).decode("ascii")
+
+    def read_struct(self, format, size=0):
+        if not size:
+            size = struct.calcsize(format)
+        return struct.unpack(format, self.mmap.read(size))
+
+    def read_uint32(self):
+        return self.read_struct(">I", 4)[0]
+
+    def read_uint16(self):
+        return self.read_struct(">H", 2)[0]
+
+    def read_byte(self):
+        return self.read_struct("B", 1)[0]
+
+    def read_string(self):
+        result = ""
+        while True:
+            char = self.read(1).decode("ascii")
+            if char == '\x00':
+                print("END")
+                print(result)
+                return result
+            result += char
+
+
+FileTableEntry = collections.namedtuple('FileTableEntry', [
+    'offset',
+    'size',
+    'flags',
+    'unknown'
+])
+
+
+class NameTableEntry:
+
+    def __init__(self, offset, index, name):
+        self.offset = offset
+        self.index = index
+        self.name = name
+
+    def __repr__(self):
+        return self.name
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("path")
+    options = parser.parse_args()
+
+    path = os.path.abspath(options.path)
+
+    with Stream(path) as stream:
+
+        if stream.read_ascii(4) != "MHWK":
+            exit("Could not find tag 'MHWK'")
+
+        file_size = stream.read_uint32()
+
+        if stream.read_ascii(4) != "RSRC":
+            exit("Could not find tag 'RSRC'")
+
+        if stream.read_uint16() != 0x100:
+            exit("Unsupported Mohawk resource version.")
+
+        # Header.
+
+        compaction = stream.read_uint16()
+        rsrc_size = stream.read_uint32()
+        abs_offset = stream.read_uint32()
+
+        # File table.
+        file_table = []
+        file_table_offset = stream.read_uint16()
+        stream.seek(abs_offset + file_table_offset)
+        file_table_size = stream.read_uint32()
+
+        print(file_table_size)
+
+        for _ in range(file_table_size):
+            offset = stream.read_uint32()
+            size = stream.read_uint16() + (stream.read_byte() << 16)
+            flags = stream.read_byte()
+            unknown = stream.read_uint16()
+            size += (flags & 7) << 24
+            file_table.append(FileTableEntry(
+                offset=offset,
+                size=size,
+                flags=flags,
+                unknown=unknown
+            ))
+        print(file_table)
+
+        stream.seek(abs_offset)
+        string_table_offset = stream.read_uint16()
+        type_count = stream.read_uint16()
+        print(string_table_offset, type_count)
+
+        for type_index in range(type_count):
+            print(f"Type {type_index}...")
+
+            tag = stream.read_uint32()
+            resource_table_offset = stream.read_uint16()
+            name_table_offset = stream.read_uint16()
+            print(tag, resource_table_offset, name_table_offset)
+
+            # TODO: Zoombini hack?
+
+            name_table = []
+            stream.seek(abs_offset + name_table_offset)
+            name_table_size = stream.read_uint16()
+            print(f"Names = {name_table_size}")
+
+            for i in range(name_table_size):
+                print(f"Loading name {i}...")
+                name_table.append(NameTableEntry(
+                    offset=stream.read_uint16(),
+                    index=stream.read_uint16(),
+                    name='',
+                ))
+
+            for name_table_entry in name_table:
+                print(f"Reading name for {name_table_entry.index}...")
+                stream.seek(abs_offset + string_table_offset + name_table_entry.offset)
+                name_table_entry.name = stream.read_string()
+
+            print(name_table)
+
+            stream.seek(abs_offset + resource_table_offset)
+            resource_count = stream.read_uint16()
+            print(f"Resource Count = {resource_count}")
+
+            for _ in range(resource_count):
+                id = stream.read_uint16()
+                index = stream.read_uint16()
+
+                for name_table_entry in name_table:
+                    if name_table_entry.index == index:
+                        resource_name = name_table_entry.name
+                        break
+
+                resource_offset = file_table[index - 1].offset
+                # TODO: tMOV hack
+                resource_size = file_table[index - 1].size;
+
+            stream.seek(abs_offset + (type_index + 1) * 8 + 4);  # TODO: Perhaps do this at the beginning?
+
+
+if __name__ == "__main__":
+    main()
