@@ -153,12 +153,17 @@ def decompress_lzss(stream, uncompressed_size):
                         break
                     continue
 
+            insert_pos += string_len
+
+            if insert_pos > POS_MASK:
+                insert_pos &= POS_MASK
+                buf += CBUFFERSIZE
+
             for k in range(string_len):
                 output_data[dst] = output_data[str_ptr]
                 dst += 1
                 str_ptr += 1
 
-            insert_pos = (insert_pos + string_len) & POS_MASK
             if bytes_out >= uncompressed_size:
                 break
 
