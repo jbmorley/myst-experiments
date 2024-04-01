@@ -3,6 +3,7 @@
 import argparse
 import collections
 import io
+import lzma
 import mmap
 import os
 import struct
@@ -41,6 +42,12 @@ class Stream:
     def read_uint32(self):
         return self.read_struct(">I", 4)[0]
 
+    def read_uint32LE(self):
+        return self.read_struct("<I", 4)[0]
+
+    def read_sint32(self):
+        return self.read_struct(">i", 4)[0]
+
     def read_uint16(self):
         return self.read_struct(">H", 2)[0]
 
@@ -71,8 +78,91 @@ class NameTableEntry:
         self.index = index
         self.name = name
 
-    def __repr__(self):
-        return self.name
+class Resource:
+
+    def __init__(self, offset, name, size):
+        self.offset = offset
+        self.size = size
+        self.name = name
+
+
+kBitsPerPixel1 = 0x0000
+kBitsPerPixel4 = 0x0001
+kBitsPerPixel8 = 0x0002
+kBitsPerPixel16 = 0x0003
+kBitsPerPixel24 = 0x0004
+kBitsPerPixelMask = 0x0007
+
+# Constants
+LEN_BITS = 6
+MIN_STRING = 3
+POS_BITS = 16 - LEN_BITS
+MAX_STRING = (1 << LEN_BITS) + MIN_STRING - 1
+CBUFFERSIZE = 1 << POS_BITS
+POS_MASK = CBUFFERSIZE - 1
+
+def decompress_lzss(stream, uncompressed_size):
+    flags = 0
+    bytes_out = 0
+    insert_pos = 0
+
+    # Ensure the output buffer is at least the size of the ring buffer
+    out_buf_size = max(uncompressed_size, CBUFFERSIZE)
+    output_data = bytearray(out_buf_size)
+    dst = 0
+    buf = 0
+
+    while stream.tell() < len(stream.getbuffer()):
+        flags >>= 1
+
+        if not (flags & 0x100):
+            flags = int.from_bytes(stream.read(1), byteorder='big') | 0xff00
+
+        if flags & 1:
+            if bytes_out >= uncompressed_size:
+                break
+            output_data[dst] = int.from_bytes(stream.read(1), byteorder='big')
+            dst += 1
+            bytes_out += 1
+            insert_pos += 1
+            if insert_pos > POS_MASK:
+                insert_pos = 0
+                buf += CBUFFERSIZE
+        else:
+            off_len = int.from_bytes(stream.read(2), byteorder='big')
+            string_len = (off_len >> POS_BITS) + MIN_STRING
+            string_pos = (off_len + MAX_STRING) & POS_MASK
+
+            bytes_out += string_len
+            if bytes_out > uncompressed_size:
+                string_len -= bytes_out - uncompressed_size
+
+            str_ptr = buf + string_pos
+            if string_pos > insert_pos:
+                if bytes_out >= CBUFFERSIZE:
+                    str_ptr -= CBUFFERSIZE
+                elif string_pos + string_len > POS_MASK:
+                    for k in range(string_len):
+                        output_data[dst] = output_data[str_ptr]
+                        dst += 1
+                        str_ptr += 1
+                        if str_ptr > POS_MASK:
+                            str_ptr = 0
+                    insert_pos = (insert_pos + string_len) & POS_MASK
+                    if bytes_out >= uncompressed_size:
+                        break
+                    continue
+
+            for k in range(string_len):
+                output_data[dst] = output_data[str_ptr]
+                dst += 1
+                str_ptr += 1
+
+            insert_pos = (insert_pos + string_len) & POS_MASK
+            if bytes_out >= uncompressed_size:
+                break
+
+    return bytes(output_data[:uncompressed_size])
 
 
 def main():
@@ -128,6 +218,7 @@ def main():
         type_count = stream.read_uint16()
         print(string_table_offset, type_count)
 
+        resources = collections.defaultdict(list)
         for type_index in range(type_count):
             print(f"Type {type_index}...")
 
@@ -164,6 +255,7 @@ def main():
                 id = stream.read_uint16()
                 index = stream.read_uint16()
 
+                resource_name = None
                 for name_table_entry in name_table:
                     if name_table_entry.index == index:
                         resource_name = name_table_entry.name
@@ -173,7 +265,25 @@ def main():
                 # TODO: tMOV hack
                 resource_size = file_table[index - 1].size;
 
+                resources[tag].append(Resource(
+                    offset=resource_offset,
+                    size=resource_size,
+                    name=resource_name,
+                ))
+
             stream.seek(abs_offset + (type_index + 1) * 8 + 4);  # TODO: Perhaps do this at the beginning?
+
+        # Write the resources to disk.
+        print(resources.keys())
+
+        for i, resource in enumerate(resources["WDIB"]):
+            stream.seek(resource.offset)
+            uncompressed_size = stream.read_uint32LE()
+            data = io.BytesIO(decompress_lzss(io.BytesIO(stream.read(resource.size)), uncompressed_size))
+
+            with open("%d.bmp" % (i, ), "wb") as fh:
+                data.seek(0)
+                fh.write(data.read())
 
 
 if __name__ == "__main__":
